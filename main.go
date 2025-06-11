@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"os"
 
 	"github.com/maruel/genai"
-	"github.com/maruel/genai/gemini"
+	"github.com/maruel/genai/adapters"
 	"github.com/maruel/genai/genaitools"
+	"github.com/maruel/genai/providers/gemini"
 )
 
 func main() {
@@ -28,9 +29,30 @@ func main() {
 		// Force the LLM to do a tool call first.
 		ToolCallRequest: genai.ToolCallRequired,
 	}
-	newMsgs, _, err := genai.GenSyncWithToolCallLoop(context.Background(), c, msgs, &opts)
+	chunks := make(chan genai.ContentFragment)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		log.Println("goroutine waiting on fragments")
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("goroutine done")
+				return
+			case fragment, ok := <-chunks:
+				if !ok {
+					log.Println("goroutine not ok")
+					return
+				}
+				log.Println("goroutine got a chunk", fragment.TextFragment)
+				_, _ = os.Stdout.WriteString(fragment.TextFragment)
+			}
+		}
+	}()
+	log.Println("Starting stream")
+	_, _, err = adapters.GenStreamWithToolCallLoop(ctx, c, msgs, chunks, &opts)
+	log.Println("Ended stream")
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("%s\n", newMsgs[len(newMsgs)-1].AsText())
 }
